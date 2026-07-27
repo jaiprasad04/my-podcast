@@ -14,6 +14,11 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 
+    const headerApiKey = req.headers.get("x-custom-api-key");
+    const customApiKey = headerApiKey || session.user.customApiKey || null;
+    const apiKey = (customApiKey && customApiKey.trim().length > 0) ? customApiKey.trim() : config.ai.apiKey;
+    const hasApiKey = apiKey && !apiKey.includes("your_") && apiKey.trim() !== "";
+
     if (id) {
       let podcast = await prisma.podcastCreation.findFirst({
         where: { id, userId: session.user.id }
@@ -24,12 +29,12 @@ export async function GET(req) {
       }
 
       // Self-healing single lookup if stuck in processing
-      if (podcast.status === "processing" && config.ai.apiKey && !config.ai.apiKey.includes("your_") && podcast.requestId && !podcast.requestId.startsWith("mock_")) {
+      if (podcast.status === "processing" && hasApiKey && podcast.requestId && !podcast.requestId.startsWith("mock_")) {
         try {
           const pollRes = await fetch(`https://api.muapi.ai/api/v1/predictions/${podcast.requestId}/result`, {
             headers: {
               "Content-Type": "application/json",
-              "x-api-key": config.ai.apiKey
+              "x-api-key": apiKey
             }
           });
 
@@ -67,14 +72,14 @@ export async function GET(req) {
 
     // Self-healing check for any processing podcasts (local webhook bypass)
     const processingPodcasts = podcasts.filter(p => p.status === "processing" && !p.requestId.startsWith("mock_"));
-    if (processingPodcasts.length > 0 && config.ai.apiKey && !config.ai.apiKey.includes("your_")) {
+    if (processingPodcasts.length > 0 && hasApiKey) {
       await Promise.all(
         processingPodcasts.map(async (p) => {
           try {
             const pollRes = await fetch(`https://api.muapi.ai/api/v1/predictions/${p.requestId}/result`, {
               headers: {
                 "Content-Type": "application/json",
-                "x-api-key": config.ai.apiKey
+                "x-api-key": apiKey
               }
             });
 

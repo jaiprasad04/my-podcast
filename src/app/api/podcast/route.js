@@ -41,22 +41,29 @@ export async function POST(req) {
       return new NextResponse("Voice ID is required", { status: 400 });
     }
 
+    // Extract custom API key
+    const headerApiKey = req.headers.get("x-custom-api-key");
+    const customApiKey = headerApiKey || body.customApiKey || session.user.customApiKey || null;
+    const isUsingCustomKey = Boolean(customApiKey && customApiKey.trim().length > 0);
+
     // Cost estimation logic (multiply USD by 200 to get credits)
     // HD: (char_count / 1000) * 0.13 * 200 = (char_count / 1000) * 26 credits
     // Turbo: (char_count / 1000) * 0.07 * 200 = (char_count / 1000) * 14 credits
     const charCount = prompt.length;
     const ratePer1k = modelType === "minimax-speech-2.6-hd" ? 26 : 14;
     const creditsEstimate = (charCount / 1000) * ratePer1k;
-    const cost = Math.max(1, Math.round(creditsEstimate));
+    const cost = isUsingCustomKey ? 0 : Math.max(1, Math.round(creditsEstimate));
 
-    try {
-      await UserService.deductCredits(session.user.id, cost);
-    } catch (err) {
-      return new NextResponse("Insufficient credits", { status: 402 });
+    if (!isUsingCustomKey && cost > 0) {
+      try {
+        await UserService.deductCredits(session.user.id, cost);
+      } catch (err) {
+        return new NextResponse("Insufficient credits", { status: 402 });
+      }
     }
 
     // Submit prediction
-    const apiKey = config.ai.apiKey;
+    const apiKey = isUsingCustomKey ? customApiKey.trim() : config.ai.apiKey;
     let audioUrl = "";
     let requestId = `mock_${Date.now()}`;
     let status = "processing";
